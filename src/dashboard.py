@@ -31,6 +31,8 @@ from modules.PeerJobs import PeerJobs
 from modules.DashboardConfig import DashboardConfig
 from modules.WireguardConfiguration import WireguardConfiguration
 from modules.AmneziaWireguardConfiguration import AmneziaWireguardConfiguration
+from modules.MikroTikWireguardConfiguration import MikroTikWireguardConfiguration
+from modules.MikroTikClient import MikroTikClient
 
 from client import createClientBlueprint
 
@@ -419,6 +421,117 @@ def API_addWireguardConfiguration():
             WireguardConfiguration(DashboardConfig, AllPeerJobs, AllPeerShareLinks, DashboardWebHooks, data=data)) if data.get('Protocol') == 'wg' else (
             AmneziaWireguardConfiguration(DashboardConfig, AllPeerJobs, AllPeerShareLinks, DashboardWebHooks, data=data))
     return ResponseObject()
+
+@app.post(f'{APP_PREFIX}/api/addMikroTikConfiguration')
+def API_addMikroTikConfiguration():
+    """Add WireGuard configuration from MikroTik device"""
+    data = request.get_json()
+    requiredKeys = [
+        "ConfigurationName", "MikroTikHost", "MikroTikUsername", "MikroTikPassword"
+    ]
+    for key in requiredKeys:
+        if key not in data.keys():
+            return ResponseObject(False, f"Please provide all required parameters: {', '.join(requiredKeys)}")
+    
+    # Check if configuration name already exists
+    if data['ConfigurationName'] in WireguardConfigurations.keys():
+        return ResponseObject(False, f"Configuration with name '{data['ConfigurationName']}' already exists")
+    
+    # Build MikroTik connection config
+    mikrotik_config = {
+        'host': data['MikroTikHost'],
+        'username': data['MikroTikUsername'],
+        'password': data['MikroTikPassword'],
+        'port': data.get('MikroTikPort', 443),
+        'use_ssl': data.get('MikroTikUseSSL', True),
+        'verify_ssl': data.get('MikroTikVerifySSL', False)
+    }
+    
+    # Test connection first
+    client = MikroTikClient(**mikrotik_config)
+    success, msg = client.test_connection()
+    if not success:
+        return ResponseObject(False, f"Failed to connect to MikroTik device: {msg}")
+    
+    # Check if interface exists on MikroTik
+    success, interface_data = client.get_wireguard_interface_by_name(data['ConfigurationName'])
+    
+    if data.get('CreateNew', False):
+        # Create new configuration on MikroTik
+        if success and interface_data:
+            return ResponseObject(False, f"Interface '{data['ConfigurationName']}' already exists on MikroTik device")
+        
+        # Validate required fields for new configuration
+        if 'PrivateKey' not in data or 'ListenPort' not in data:
+            return ResponseObject(False, "PrivateKey and ListenPort are required to create new configuration")
+        
+        # Create configuration
+        try:
+            config = MikroTikWireguardConfiguration(
+                DashboardConfig=DashboardConfig,
+                AllPeerJobs=AllPeerJobs,
+                AllPeerShareLinks=AllPeerShareLinks,
+                DashboardWebHooks=DashboardWebHooks,
+                data=data,
+                mikrotik_config=mikrotik_config
+            )
+            WireguardConfigurations[data['ConfigurationName']] = config
+            return ResponseObject(True, "MikroTik configuration created successfully")
+        except Exception as e:
+            app.logger.error(f"Failed to create MikroTik configuration: {e}")
+            return ResponseObject(False, f"Failed to create configuration: {str(e)}")
+    else:
+        # Import existing configuration from MikroTik
+        if not success or not interface_data:
+            return ResponseObject(False, f"Interface '{data['ConfigurationName']}' not found on MikroTik device")
+        
+        try:
+            config = MikroTikWireguardConfiguration(
+                DashboardConfig=DashboardConfig,
+                AllPeerJobs=AllPeerJobs,
+                AllPeerShareLinks=AllPeerShareLinks,
+                DashboardWebHooks=DashboardWebHooks,
+                name=data['ConfigurationName'],
+                mikrotik_config=mikrotik_config
+            )
+            WireguardConfigurations[data['ConfigurationName']] = config
+            return ResponseObject(True, "MikroTik configuration imported successfully")
+        except Exception as e:
+            app.logger.error(f"Failed to import MikroTik configuration: {e}")
+            return ResponseObject(False, f"Failed to import configuration: {str(e)}")
+
+@app.post(f'{APP_PREFIX}/api/testMikroTikConnection')
+def API_testMikroTikConnection():
+    """Test connection to MikroTik device"""
+    data = request.get_json()
+    requiredKeys = ["MikroTikHost", "MikroTikUsername", "MikroTikPassword"]
+    
+    for key in requiredKeys:
+        if key not in data.keys():
+            return ResponseObject(False, f"Please provide: {', '.join(requiredKeys)}")
+    
+    mikrotik_config = {
+        'host': data['MikroTikHost'],
+        'username': data['MikroTikUsername'],
+        'password': data['MikroTikPassword'],
+        'port': data.get('MikroTikPort', 443),
+        'use_ssl': data.get('MikroTikUseSSL', True),
+        'verify_ssl': data.get('MikroTikVerifySSL', False)
+    }
+    
+    client = MikroTikClient(**mikrotik_config)
+    success, msg = client.test_connection()
+    
+    if success:
+        # Also get list of WireGuard interfaces
+        success_ifaces, interfaces = client.get_wireguard_interfaces()
+        if success_ifaces:
+            return ResponseObject(True, "Connection successful", {
+                'interfaces': [iface.get('name') for iface in interfaces]
+            })
+        return ResponseObject(True, "Connection successful", {'interfaces': []})
+    
+    return ResponseObject(False, msg)
 
 @app.get(f'{APP_PREFIX}/api/toggleWireguardConfiguration')
 def API_toggleWireguardConfiguration():
