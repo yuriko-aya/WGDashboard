@@ -9,10 +9,11 @@ import {ref} from "vue";
 import {DashboardConfigurationStore} from "@/stores/DashboardConfigurationStore.js";
 import {exp} from "qrcode/lib/core/galois-field.js";
 import NewConfigurationTemplates from "@/components/newConfigurationComponents/newConfigurationTemplates.vue";
+import NewMikroTikConfiguration from "@/components/newConfigurationComponents/newMikroTikConfiguration.vue";
 
 export default {
 	name: "newConfiguration",
-	components: {NewConfigurationTemplates, LocaleText},
+	components: {NewMikroTikConfiguration, NewConfigurationTemplates, LocaleText},
 	async setup(){
 		const store = WireguardConfigurationsStore()
 		const protocols = ref([])
@@ -48,6 +49,8 @@ export default {
 				H3: 0,
 				H4: 0
 			},
+			mikrotikConfig: null,
+			mikrotikValid: false,
 			numberOfAvailableIPs: "0",
 			error: false,
 			errorMessage: "",
@@ -76,22 +79,56 @@ export default {
 			const wg = window.wireguard.generateKeypair();
 			this.newConfiguration.PrivateKey = wg.privateKey;
 			this.newConfiguration.PublicKey = wg.publicKey;
-			this.newConfiguration.PresharedKey = wg.presharedKey;
+		handleMikroTikValidation(config, isValid){
+			this.mikrotikConfig = config;
+			this.mikrotikValid = isValid;
 		},
 		async saveNewConfiguration(){
 			if (this.goodToSubmit){
 				this.loading = true;
-				await fetchPost("/api/addWireguardConfiguration", this.newConfiguration, async (res) => {
-					if (res.status){
-						this.success = true
-						await this.store.getConfigurations()
-						this.$router.push(`/configuration/${this.newConfiguration.ConfigurationName}/peers`)
-					}else{
-						this.error = true;
-						this.errorMessage = res.message;
-						document.querySelector(`#${res.data}`).classList.remove("is-valid")
-						document.querySelector(`#${res.data}`).classList.add("is-invalid")
-						this.loading = false;
+				
+				// MikroTik configuration
+				if (this.newConfiguration.Protocol === 'mikrotik'){
+					const payload = {
+						ConfigurationName: this.newConfiguration.ConfigurationName,
+						...this.mikrotikConfig
+					};
+					
+					// Add WireGuard fields if creating new
+					if (this.mikrotikConfig.CreateNew){
+						payload.PrivateKey = this.newConfiguration.PrivateKey;
+						payload.ListenPort = this.newConfiguration.ListenPort;
+						payload.Address = this.newConfiguration.Address;
+					}
+					
+					await fetchPost("/api/addMikroTikConfiguration", payload, async (res) => {
+						if (res.status){
+							this.success = true;
+							await this.store.getConfigurations();
+							this.$router.push(`/configuration/${this.newConfiguration.ConfigurationName}/peers`);
+						}else{
+							this.error = true;
+							this.errorMessage = res.message;
+							this.loading = false;
+						}
+					});
+				}
+				// Standard WireGuard/AmneziaWG configuration
+				else {
+					await fetchPost("/api/addWireguardConfiguration", this.newConfiguration, async (res) => {
+						if (res.status){
+							this.success = true
+							await this.store.getConfigurations()
+							this.$router.push(`/configuration/${this.newConfiguration.ConfigurationName}/peers`)
+						}else{
+							this.error = true;
+							this.errorMessage = res.message;
+							document.querySelector(`#${res.data}`).classList.remove("is-valid")
+							document.querySelector(`#${res.data}`).classList.add("is-invalid")
+							this.loading = false;
+						}
+					})
+				}this.loading = false;
 					}
 				})
 			}
@@ -127,6 +164,26 @@ export default {
 	},
 	computed: {
 		goodToSubmit(){
+			// MikroTik configuration validation
+			if (this.newConfiguration.Protocol === 'mikrotik'){
+				const nameValid = this.newConfiguration.ConfigurationName.length > 0 &&
+					/^[a-zA-Z0-9_=+.-]{1,15}$/.test(this.newConfiguration.ConfigurationName) &&
+					!this.store.Configurations.find(x => x.Name === this.newConfiguration.ConfigurationName);
+				
+				// If creating new, also need standard WG fields
+				if (this.mikrotikConfig && this.mikrotikConfig.CreateNew){
+					return nameValid && 
+						this.mikrotikValid &&
+						this.newConfiguration.PrivateKey.length > 0 &&
+						this.newConfiguration.ListenPort > 0 &&
+						this.newConfiguration.Address.length > 0;
+				}
+				
+				// If importing existing, only need name and MikroTik config
+				return nameValid && this.mikrotikValid;
+			}
+			
+			// Standard WireGuard/AmneziaWG validation
 			let requirements = ["ConfigurationName", "Address", "ListenPort", "PrivateKey"]
 			let elements = [...document.querySelectorAll("input[required]")];
 			return requirements.find(x => {
@@ -231,12 +288,12 @@ export default {
 					<div class="card-header">
 						<LocaleText t="Protocol"></LocaleText>
 					</div>
-					<div class="card-body d-flex gap-2 protocolBtnGroup">
+					<div class="card-body d-flex gap-2 protocolBtnGroup flex-wrap">
 						<a 
 							v-if="this.protocols.includes('wg')"
 							@click="this.newConfiguration.Protocol = 'wg'"
 							:class="{'opacity-50': this.newConfiguration.Protocol !== 'wg'}"
-							class="btn btn-primary wireguardBg border-0 " style="flex-basis: 100%">
+							class="btn btn-primary wireguardBg border-0 " style="flex-basis: calc(50% - 0.5rem)">
 							<i class="bi bi-check-circle-fill me-2" v-if="this.newConfiguration.Protocol === 'wg'"></i>
 							<i class="bi bi-circle me-2" v-else></i>
 							<strong>
@@ -247,13 +304,29 @@ export default {
 							@click="this.newConfiguration.Protocol = 'awg'"
 							v-if="this.protocols.includes('awg')"
 							:class="{'opacity-50': this.newConfiguration.Protocol !== 'awg'}"
-							class="btn btn-primary amneziawgBg border-0" style="flex-basis: 100%">
+							class="btn btn-primary amneziawgBg border-0" style="flex-basis: calc(50% - 0.5rem)">
 							<i class="bi bi-check-circle-fill me-2" v-if="this.newConfiguration.Protocol === 'awg'"></i>
 							<i class="bi bi-circle me-2" v-else></i>
 							<strong>
 								AmneziaWG
 							</strong>
 						</a>
+						<a
+							@click="this.newConfiguration.Protocol = 'mikrotik'"
+							:class="{'opacity-50': this.newConfiguration.Protocol !== 'mikrotik'}"
+							class="btn btn-primary bg-danger border-0" style="flex-basis: calc(50% - 0.5rem)">
+							<i class="bi bi-check-circle-fill me-2" v-if="this.newConfiguration.Protocol === 'mikrotik'"></i>
+							<i class="bi bi-circle me-2" v-else></i>
+							<strong>
+								MikroTik
+							</strong>
+						</a>
+					</div>
+					<div class="card-footer text-muted" v-if="this.newConfiguration.Protocol === 'mikrotik'">
+						<small>
+							<i class="bi bi-info-circle me-1"></i>
+							<LocaleText t="Manage WireGuard on MikroTik RouterOS via REST API"></LocaleText>
+						</small>
 					</div>
 				</div>
 				
@@ -282,6 +355,16 @@ export default {
 						</div>
 					</div>
 				</div>
+				
+				<!-- MikroTik Configuration Component -->
+				<NewMikroTikConfiguration 
+					v-if="this.newConfiguration.Protocol === 'mikrotik'"
+					@validated="handleMikroTikValidation"
+				></NewMikroTikConfiguration>
+				
+				<!-- Standard WireGuard/AmneziaWG Configuration Fields -->
+				<template v-if="this.newConfiguration.Protocol !== 'mikrotik' || (mikrotikConfig && mikrotikConfig.CreateNew)">
+					
 				<div class="card rounded-3 shadow">
 					<div class="card-header">
 						<LocaleText t="Private Key"></LocaleText> & <LocaleText t="Public Key"></LocaleText>
@@ -358,8 +441,11 @@ export default {
 					</div>
 				</div>
 				
-				<hr>
-				<div class="accordion" id="newConfigurationOptionalAccordion">
+				</template>
+				<!-- End of Standard WireGuard/AmneziaWG Configuration Fields -->
+				
+				<hr v-if="this.newConfiguration.Protocol !== 'mikrotik'">
+				<div class="accordion" v-if="this.newConfiguration.Protocol !== 'mikrotik'" id="newConfigurationOptionalAccordion">
 					<div class="accordion-item">
 						<h2 class="accordion-header">
 							<button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#newConfigurationOptionalAccordionCollapse">
