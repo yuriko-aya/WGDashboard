@@ -110,6 +110,10 @@ export default {
 						}else{
 							this.error = true;
 							this.errorMessage = res.message;
+							if (res.data) {
+								document.querySelector(`#${res.data}`).classList.remove("is-valid");
+								document.querySelector(`#${res.data}`).classList.add("is-invalid");
+							}
 							this.loading = false;
 						}
 					});

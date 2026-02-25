@@ -479,7 +479,7 @@ def API_addMikroTikConfiguration():
             return ResponseObject(True, "MikroTik configuration created successfully")
         except Exception as e:
             app.logger.error(f"Failed to create MikroTik configuration: {e}")
-            return ResponseObject(False, f"Failed to create configuration: {str(e)}")
+            return ResponseObject(False, f"Failed to create configuration: {str(e)}", "ConfigurationName")
     else:
         # Import existing configuration from MikroTik
         if not success or not interface_data:
@@ -498,6 +498,7 @@ def API_addMikroTikConfiguration():
             return ResponseObject(True, "MikroTik configuration imported successfully")
         except Exception as e:
             app.logger.error(f"Failed to import MikroTik configuration: {e}")
+            return ResponseObject(False, f"Failed to import configuration: {str(e)}", "ConfigurationName")
             return ResponseObject(False, f"Failed to import configuration: {str(e)}")
 
 @app.post(f'{APP_PREFIX}/api/testMikroTikConnection')

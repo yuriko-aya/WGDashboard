@@ -104,7 +104,7 @@ class MikroTikWireguardConfiguration(WireguardConfiguration):
             self.configPath = f"mikrotik://{self.mikrotik_config.get('host', 'unknown')}/{name}"
             self.createDatabase()
             self.__parseConfigurationFromMikroTik()
-            self.__initPeersList()
+            self._WireguardConfiguration__initPeersList()
         elif data is not None:
             # Create new configuration on MikroTik
             self.Name = data.get("ConfigurationName")
@@ -120,7 +120,7 @@ class MikroTikWireguardConfiguration(WireguardConfiguration):
             # Create on MikroTik device
             self.createDatabase()
             self.__createConfigurationOnMikroTik()
-            self.__initPeersList()
+            self._WireguardConfiguration__initPeersList()
         
         # Create backup directory (virtual for MikroTik)
         backup_path = os.path.join(self.DashboardConfig.GetConfig("Server", "wg_conf_path")[1], 'WGDashboard_Backup_MikroTik')
