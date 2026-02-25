@@ -79,6 +79,7 @@ export default {
 			const wg = window.wireguard.generateKeypair();
 			this.newConfiguration.PrivateKey = wg.privateKey;
 			this.newConfiguration.PublicKey = wg.publicKey;
+		},
 		handleMikroTikValidation(config, isValid){
 			this.mikrotikConfig = config;
 			this.mikrotikValid = isValid;
@@ -128,9 +129,7 @@ export default {
 							this.loading = false;
 						}
 					})
-				}this.loading = false;
-					}
-				})
+				}
 			}
 		},
 		openFileUpload(){
